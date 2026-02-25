@@ -1,0 +1,57 @@
+# Pulsar ClickPipe PoC: Pulsar + ClickHouse + connector (all in Docker)
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: ch-pulsar-poc
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: default
+      # Required for HTTP access from other containers (newer images 401 without it)
+      CLICKHOUSE_PASSWORD: clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pulsar:
+    image: apachepulsar/pulsar:4.0.8
+    container_name: pulsar-poc
+    working_dir: /pulsar
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"   # Pulsar protocol
+      - "8080:8080"   # HTTP
+    volumes:
+      - pulsardata:/pulsar/data
+      - pulsarconf:/pulsar/conf
+    environment:
+      # Limit JVM heap so standalone can start on smaller machines (default can be 2G+)
+      PULSAR_MEM: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m"
+    # Pulsar takes 60–90s to become ready; run_poc.sh and connector retry
+
+  connector:
+    build: ./connector
+    container_name: pulsar-clickpipe-connector
+    environment:
+      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_TOPIC: events
+      PULSAR_SUBSCRIPTION: clickhouse-pipe
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_TABLE: default.events_merged
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+      BATCH_SIZE: "100"
+      BATCH_TIMEOUT_MS: "2000"
+      INIT_SLEEP: "15"
+      # MESSAGE_FORMAT: "avro"   # set to avro when producing with produce_events_avro.py
+    depends_on:
+      - clickhouse
+      - pulsar
+
+volumes:
+  pulsardata: {}
+  pulsarconf: {}
