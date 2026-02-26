@@ -1,0 +1,39 @@
+# ClickHouse Cloud: Pulsar + connector only (no local ClickHouse).
+# Set CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD in .env (copy from .env.example).
+# Run: docker compose -f docker-compose.cloud.yml up -d
+
+services:
+  pulsar:
+    image: apachepulsar/pulsar:4.0.8
+    container_name: pulsar-poc
+    working_dir: /pulsar
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"
+      - "8080:8080"
+    volumes:
+      - pulsardata:/pulsar/data
+      - pulsarconf:/pulsar/conf
+    environment:
+      PULSAR_MEM: "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m"
+
+  connector:
+    build: ./connector
+    container_name: pulsar-clickpipe-connector
+    environment:
+      PULSAR_URL: pulsar://pulsar:6650
+      PULSAR_TOPIC: events
+      PULSAR_SUBSCRIPTION: clickhouse-pipe
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL}
+      CLICKHOUSE_TABLE: ${CLICKHOUSE_TABLE:-default.events_merged}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      BATCH_SIZE: "100"
+      BATCH_TIMEOUT_MS: "2000"
+      INIT_SLEEP: "15"
+    depends_on:
+      - pulsar
+
+volumes:
+  pulsardata: {}
+  pulsarconf: {}

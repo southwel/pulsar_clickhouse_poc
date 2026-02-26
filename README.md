@@ -12,4 +12,6 @@ sleep 10
 docker compose exec clickhouse clickhouse-client -q "SELECT * FROM default.events_merged ORDER BY ts DESC LIMIT 10"
 ```
 
+ClickHouse Cloud: copy .env.example to .env, fill in URL/user/password, then `./scripts/run_poc_cloud.sh`.
+
 Repo: https://github.com/southwel/pulsar_clickhouse_poc
