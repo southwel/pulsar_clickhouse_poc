@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Pulsar topic -> batch insert into ClickHouse (JSON).
+# Pulsar topic -> batch insert into ClickHouse. JSON or Avro (MESSAGE_FORMAT=avro).
 import os
 import sys
 import time
@@ -21,6 +21,20 @@ CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
 BATCH_TIMEOUT_MS = int(os.environ.get("BATCH_TIMEOUT_MS", "2000"))
 INIT_SLEEP = int(os.environ.get("INIT_SLEEP", "5"))
+MESSAGE_FORMAT = (os.environ.get("MESSAGE_FORMAT", "json")).lower().strip()
+
+try:
+    from pulsar.schema import AvroSchema, Record, String
+except ImportError:
+    AvroSchema = Record = String = None  # type: ignore
+
+
+class EventRecord(Record):
+    ts = String()
+    event_id = String()
+    user_id = String()
+    event_type = String()
+    payload = String()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +76,17 @@ def ensure_clickhouse_table() -> None:
     log.info("table %s ok", CLICKHOUSE_TABLE)
 
 
+def _avro_value_to_json_line(value) -> bytes:
+    keys = ("ts", "event_id", "user_id", "event_type", "payload")
+    if isinstance(value, dict):
+        d = {k: value.get(k, "") for k in keys}
+    elif hasattr(value, "__dict__"):
+        d = {k: getattr(value, k, "") for k in keys}
+    else:
+        d = {k: getattr(value, k, "") for k in keys}
+    return json.dumps(d, ensure_ascii=False).encode("utf-8")
+
+
 def insert_batch(rows: List[bytes]) -> None:
     if not rows:
         return
@@ -79,7 +104,11 @@ def insert_batch(rows: List[bytes]) -> None:
 
 
 def run() -> None:
-    log.info("connector starting: %s %s", PULSAR_URL, PULSAR_TOPIC)
+    use_avro = MESSAGE_FORMAT == "avro"
+    if use_avro and (AvroSchema is None or Record is None):
+        raise RuntimeError("MESSAGE_FORMAT=avro requires pulsar-client[avro] (pip install 'pulsar-client[avro]')")
+
+    log.info("connector starting: %s %s format=%s", PULSAR_URL, PULSAR_TOPIC, MESSAGE_FORMAT)
 
     time.sleep(INIT_SLEEP)
     ensure_clickhouse_table()
@@ -87,12 +116,13 @@ def run() -> None:
     for attempt in range(1, 13):
         try:
             client = pulsar.Client(PULSAR_URL)
-            consumer = client.subscribe(
-                PULSAR_TOPIC,
-                PULSAR_SUBSCRIPTION,
-                consumer_type=pulsar.ConsumerType.Shared,
-                initial_position=pulsar.InitialPosition.Earliest,
-            )
+            sub_kw: dict = {
+                "consumer_type": pulsar.ConsumerType.Shared,
+                "initial_position": pulsar.InitialPosition.Earliest,
+            }
+            if use_avro:
+                sub_kw["schema"] = AvroSchema(EventRecord)
+            consumer = client.subscribe(PULSAR_TOPIC, PULSAR_SUBSCRIPTION, **sub_kw)
             break
         except Exception as e:
             log.warning("Pulsar connect attempt %d failed: %s", attempt, e)
@@ -107,7 +137,10 @@ def run() -> None:
         while True:
             try:
                 msg = consumer.receive(timeout_millis=min(500, BATCH_TIMEOUT_MS))
-                raw = msg.data()
+                if use_avro:
+                    raw = _avro_value_to_json_line(msg.value())
+                else:
+                    raw = msg.data()
                 batch.append((msg, raw))
                 if batch_deadline is None:
                     batch_deadline = time.monotonic() + (BATCH_TIMEOUT_MS / 1000.0)
