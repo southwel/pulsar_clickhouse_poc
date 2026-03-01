@@ -1,4 +1,4 @@
-Pulsar → Python connector → ClickHouse. Same idea as a ClickPipe but for Pulsar (no native support today). Connector batches and inserts over HTTP. JSON by default; Avro works if you set MESSAGE_FORMAT=avro and use the events-avro topic + produce_events_avro.py.
+Pulsar → Python connector → ClickHouse. Same idea as a ClickPipe but for Pulsar (no native support today). Connector batches and inserts over HTTP. JSON by default; Avro: set MESSAGE_FORMAT=avro and PULSAR_TOPIC=events-avro, then run `python produce_events.py avro`.
 
 Local: `./scripts/run_poc.sh` (needs Docker; Pulsar takes ~90s to come up).
 

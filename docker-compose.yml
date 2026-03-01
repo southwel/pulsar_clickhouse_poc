@@ -47,7 +47,7 @@ services:
       BATCH_SIZE: "100"
       BATCH_TIMEOUT_MS: "2000"
       INIT_SLEEP: "15"
-      # MESSAGE_FORMAT: "avro"   # set to avro when producing with produce_events_avro.py
+      # MESSAGE_FORMAT: "avro"   # set for Avro; produce with: python produce_events.py avro
     depends_on:
       - clickhouse
       - pulsar
